@@ -14,8 +14,8 @@ global{
 	int displatTextSize <-4;
 	
 	/* ************************* Parameters ************************** */
-	int 	peopleApp 			<- 1;
-	int 	peopleNApp 			<- 0; // Agentes sin python
+	int 	peopleApp 			<- 0;
+	int 	peopleNApp 			<- 15; // Agentes sin python
 	float 	percentage_allowed	<- 0.25;
 	int	 	wait_response_time		;
 	float	app_trust_decrease	<- 0.015;
@@ -79,6 +79,7 @@ global{
 		create user number: peopleApp
 		{
 			name 	<- "user_"+string(user_id);
+			u_id	<- user_id;
 			user_id <- user_id+1;
 		}
 		
@@ -410,9 +411,10 @@ species people skills:[moving] control: simple_bdi{
 
 
 species user parent:people {
-	list<app> app_list<-[];
-	float app_trust <- rnd(0.0,1.0);
-	string last_choice;
+	list<app> 	app_list<-[];
+	float 		app_trust <- rnd(0.0,1.0);
+	string 		last_choice;
+	int 		u_id;
 	
 	
 	
@@ -444,7 +446,7 @@ species user parent:people {
 			app_list[0].flgSend <- true;
 			ask app_list
 			{
-				do request;
+				do request index:u_id;
 			}
 			do remove_intention(find_near_store);
 			do add_intention(wait_response);
@@ -663,10 +665,10 @@ species user parent:people {
 		point 			coordinates;
 	
 		// Send data to server
-		action request
+		action request (int index)
 		{
 			string converted_coordinates <- string(coordinates CRS_transform("EPSG:4326"));
-			do send  contents: "1;"+converted_coordinates;
+			do send  contents: string(index)+";"+converted_coordinates;
 		}
 	}
 	
