@@ -14,11 +14,16 @@ global{
 	int displatTextSize <-4;
 	
 	/* ************************* Parameters ************************** */
-	int 	peopleApp 			<- 200;
-	int 	peopleNApp 			<- 200; // Agentes sin python
-	float 	percentage_allowed	<- 0.25;
+	float 	percentage_allowed	<- 0.25		category:'Environment';
+	bool	allow_cycle			<- false	category:'Environment';
+	float 	cycle_rate			<- 0.0		category:'Environment';
+	
+	int 	peopleApp 			<- 1		category:'New simulation';
+	int 	peopleNApp 			<- 0		category:'New simulation'; // Agentes sin python
+	
+	
 	int	 	wait_response_time		;
-	float	app_trust_decrease	<- 0.015;
+	float	app_trust_decrease	<- 0.15;
 	
 	
 	/* ************************* Maps ************************** */
@@ -73,6 +78,7 @@ global{
 				stores[i].store 		 <- string(store_locations[5,i]);
 				stores[i].capacity 		 <- int(store_locations[6,i]);
 				stores[i].people_allowed <- int(stores[i].capacity*percentage_allowed);
+				stores[i].color_i		 <- rgb(rnd(0,255),rnd(0,255),rnd(0,255));
 		}
 		
 		// Create people
@@ -96,30 +102,34 @@ global{
 	
 	action calculate_app_trust_average(int entry)
 	{
-		if entry = 1
+		if peopleApp !=0
 		{
-			loop us over: user {
-				average_trust_start <- average_trust_start+us.app_trust;
+			if entry = 1
+			{
+				loop us over: user {
+					average_trust_start <- average_trust_start+us.app_trust;
+				}
+				average_trust_start <- average_trust_start/peopleApp;
 			}
-			average_trust_start <- average_trust_start/peopleApp;
+			else if entry = 2
+			{
+				loop us over: user {
+					average_trust_end <- average_trust_end+us.app_trust;
+				}
+				average_trust_end <- average_trust_end/peopleApp;			
+			}			
 		}
-		else if entry = 2
-		{
-			loop us over: user {
-				average_trust_end <- average_trust_end+us.app_trust;
-			}
-			average_trust_end <- average_trust_end/peopleApp;			
-		}
+
 	}
 	
 	
-	 
+	/*
 	reflex save_store_state when:every(10#cycle){
 		ask store_point {
 			save store_point to: "../results/store_state.csv" type:"csv" rewrite: false;
 		}
 	}
-	
+	*/ 
 	
 	reflex halting when:(people_end_shopping=total_people)
 	{ 
@@ -393,15 +403,35 @@ species people skills:[moving] control: simple_bdi{
 		{
 			do remove_intention(go_home);
 			//do add_intention(stay_home);
-			do add_intention(ending);
-			people_end_shopping <- people_end_shopping + 1;
-			write people_end_shopping;
+			
+			
+			// Add to evaluate if simulations need being cycled
+			if allow_cycle
+			{
+				if flip(cycle_rate)
+				{
+					need_supplies_time	<- rnd(120);
+					do add_intention(stay_home);
+					
+					write name+" >> Again >> time >> "+ need_supplies_time;
+				}
+				else
+				{
+					do add_intention(ending);
+					people_end_shopping <- people_end_shopping + 1;
+				}
+			}
+			else
+			{
+				do add_intention(ending);
+				people_end_shopping <- people_end_shopping + 1;
+			}
 		}
 	}
 	
 	
 	plan end intention: ending
-	{
+	{	
 		
 	}
 
@@ -739,6 +769,7 @@ species store_point {
 	int		people_allowed	 <- 1;
 	int 	current_people	 <- 0;
 	float	crowd_percentage <- 0.0;
+	rgb 	color_i;
 	
 	
 	aspect default 
@@ -767,26 +798,28 @@ species store_point {
 
 
 experiment mi_experimento type:gui{
-	/*
-	parameter "People with App:"	var:	peopleApp	<-	0;
-	parameter "People without App:"	var:	peopleNApp	<-	0;
-	  */
+	
+	parameter "People with App:"				var:peopleApp ;
+	parameter "People without App:"				var:peopleNApp;
+	parameter "Capacity percentage allowed:" 	var:percentage_allowed 	min:0.0 	max:1.0 	step:0.01;
+	parameter "Cycle simulation:" 				var:allow_cycle 		enables:cycle_rate;
+	parameter "Cycle rate:" 					var:cycle_rate 			min:0.0 	max:1.0 	step:0.01;
 
 	
 	output{
 		//layout #split;
-		display GUI //type:opengl 
+		display GUI type:opengl 
 		{
 			species street 				aspect: basico		refresh: false;
 			species residential_block 	aspect: basico		refresh: false;
 			species comercial_block 	aspect: basico		refresh: false;
 			species store_point			aspect: default		;//refresh: false;
-			species person 				aspect: default;
-			species user 				aspect: default;
+			species person 				aspect: default		;
+			species user 				aspect: default		;
 			
 			
 			
-			/* 
+			
 			overlay position: { 40#px, 30#px } size: { 0,0} background: #white border: #black {
 				string minutes;
 				if current_date.minute < 10
@@ -797,10 +830,17 @@ experiment mi_experimento type:gui{
 				{
 					minutes <- string(current_date.minute);
 				}
-				draw ""+current_date.hour+":"+minutes at:{ 20#px, 20#px} color:#black font:font("Arial",55,#bold);
+				
+				draw ""+ (current_date.day-1) +" day, "+current_date.hour+":"+minutes at:{ 20#px, 20#px} color:#black font:font("Arial",55,#bold);
 			}
-			*/
+			
+		}
 		
+		display Statistics{
+			chart "Crowd" type:series y_label:"Crowd percentage"{
+				datalist stores value:(stores collect each.crowd_percentage) legend:(stores collect each.store) color:(stores collect each.color_i) marker:false;
+				data "Percentage allowed" value:(percentage_allowed*100) color:#red marker:false;
+			}
 		}
 		
 	}

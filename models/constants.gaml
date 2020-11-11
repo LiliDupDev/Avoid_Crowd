@@ -9,7 +9,7 @@
 model constants
 
 global{
-	date starting_date <- date([2020,10,13,0,0,0]);
+	date starting_date <- date([2020,10,1,0,0,0]);
 
 	/* ************************* Connection Data ************************** */
 	string tcp_server 	<- "localhost";
