@@ -18,12 +18,21 @@ global{
 	bool	allow_cycle			<- false	category:'Environment';
 	float 	cycle_rate			<- 0.0		category:'Environment';
 	
-	int 	peopleApp 			<- 1		category:'New simulation';
-	int 	peopleNApp 			<- 0		category:'New simulation'; // Agentes sin python
+	int 	peopleApp 			<- 100		category:'New simulation';
+	int 	peopleNApp 			<- 100		category:'New simulation'; // Agentes sin python
 	
 	
 	int	 	wait_response_time		;
 	float	app_trust_decrease	<- 0.15;
+	
+	
+	/* ************************* Monitors ************************** */
+	int good_rec			<-	0;
+	int bad_rec				<-	0;
+	int times_follow_app	<-	0;
+	int times_follow_known	<-	0;
+	int rec_count			<- 	0;
+	//int request_rec			<- 	0;
 	
 	
 	/* ************************* Maps ************************** */
@@ -114,6 +123,10 @@ global{
 			else if entry = 2
 			{
 				loop us over: user {
+					if us.app_trust>1
+					{
+						us.app_trust<-1;
+					}
 					average_trust_end <- average_trust_end+us.app_trust;
 				}
 				average_trust_end <- average_trust_end/peopleApp;			
@@ -136,7 +149,9 @@ global{
 		do calculate_app_trust_average entry:2;
 		write "Avg start: "+average_trust_start;
 		write "Avg end: "+average_trust_end;
+		write "Rec count:" +rec_count;
 		write "Halting ...";
+		
 		do pause;
 		
 		//do die;
@@ -192,6 +207,7 @@ species manager skills:[network]
 			}
 		}
 	}
+	
 }
 
 
@@ -405,7 +421,7 @@ species people skills:[moving] control: simple_bdi{
 			//do add_intention(stay_home);
 			
 			
-			// Add to evaluate if simulations need being cycled
+			// Added to evaluate if simulation needs being cycled
 			if allow_cycle
 			{
 				if flip(cycle_rate)
@@ -449,7 +465,8 @@ species user parent:people {
 	
 	init
 	{
-		create app number: 1{
+		create app number: 1
+		{
 			//app_position 	<- app_id;
 			name 			<- "app_" + string(app_id); 
 			app_id 			<-	app_id+1;
@@ -476,6 +493,7 @@ species user parent:people {
 			{
 				do request;
 			}
+			app_list[0].flgSend <- false;
 			do remove_intention(find_near_store);
 			do add_intention(wait_response);
 		}
@@ -494,16 +512,12 @@ species user parent:people {
 		
 		point old_goal <- goal_place;
 		
-		/* 
-		if has_emotion(fearConfirmed)
-		{
-			waitTimeForResponse <- wait_response_time;
-		}
-		*/
-		
+
 		
 		if(length(app_list[0].recommended_places)>0)
 		{
+			rec_count <- rec_count+1;
+			
 			if between(app_trust, 0.65,1 )
 			{
 				
@@ -534,6 +548,7 @@ species user parent:people {
 				}
 				
 				current_choice <- choice[1];
+				times_follow_app <- times_follow_app+1;
 			}
 			else
 			{
@@ -548,7 +563,7 @@ species user parent:people {
 					
 					if goal_place = converted_target
 					{
-						selected <- one_of(app_list[0].recommended_places - app_list[0].recommended_places[0]);
+						selected 	<- one_of(app_list[0].recommended_places - app_list[0].recommended_places[0]);
 					}
 					
 					pp 				<-  selected split_with(","); 
@@ -566,7 +581,8 @@ species user parent:people {
 					{
 						failed <- true;
 					}
-					current_choice <- choice[1];
+					current_choice   <- choice[1];
+					times_follow_app <- times_follow_app+1;
 					
 				}
 				else
@@ -588,6 +604,7 @@ species user parent:people {
 					}
 					
 					current_choice <- choice[2];
+					times_follow_known <- times_follow_known+1;
 				}
 			}
 			
@@ -618,6 +635,7 @@ species user parent:people {
 				if has_emotion(fearConfirmed) and last_choice = choice[1] and last(visited_places) != old_goal
 				{
 					save (string(cycle) + "," +name+","+old_goal+";") to: "../results/bad_recommendation.txt" type:"text" rewrite: false;
+					bad_rec <- bad_rec+1;
 				}
 			}
 			
@@ -647,6 +665,7 @@ species user parent:people {
 			if last_choice = choice[1]
 			{
 				save (string(cycle) + "," + name + "," + goal_place + ";") to: "../results/good_recommendation.txt" type:"text" rewrite: false;
+				good_rec <- good_rec+1;
 			}
 				
 			if flip(0.5)
@@ -695,8 +714,13 @@ species user parent:people {
 		// Send data to server
 		action request
 		{
-			string converted_coordinates <- string(coordinates CRS_transform("EPSG:4326"));
-			do send  contents: converted_coordinates;
+			if flgSend
+			{
+				string converted_coordinates <- string(coordinates CRS_transform("EPSG:4326"));
+				do send  contents: converted_coordinates;
+				//request_rec <- request_rec+1;
+			}
+
 		}
 	}
 	
@@ -704,7 +728,8 @@ species user parent:people {
 
 
 
-species person parent:people {
+species person parent:people 
+{
 	
 	plan choose_store intention: find_near_store instantaneous: true
 	{
@@ -749,7 +774,8 @@ species person parent:people {
 	}
 
 	
-	aspect default {
+	aspect default 
+	{
 		draw circle(5#m) color: #green;
 		//draw ("B:" + length(belief_base) + ":" + belief_base) color:#black size:displatTextSize; 
 		//draw ("D:" + length(desire_base) + ":" + desire_base) color:#black size:displatTextSize at:{location.x,location.y+displatTextSize}; 
@@ -831,17 +857,33 @@ experiment mi_experimento type:gui{
 					minutes <- string(current_date.minute);
 				}
 				
-				draw ""+ (current_date.day-1) +" day, "+current_date.hour+":"+minutes at:{ 20#px, 20#px} color:#black font:font("Arial",55,#bold);
+				draw ""+ (current_date.day-1) +" day, "+current_date.hour+":"+minutes at:{ 20#px, 20#px} color:#black font:font("Arial",20,#bold);
 			}
+			
 			
 		}
 		
-		display Statistics{
-			chart "Crowd" type:series y_label:"Crowd percentage"{
+		
+		display Statistics
+		{
+			chart "Crowd by store" type:series y_label:"Crowd percentage"  size: {0.5,0.5} position: {0, 0.5}
+			{
 				datalist stores value:(stores collect each.crowd_percentage) legend:(stores collect each.store) color:(stores collect each.color_i) marker:false;
 				data "Percentage allowed" value:(percentage_allowed*100) color:#red marker:false;
 			}
+			
+			 chart "Recommendation" type: pie size: {0.5,0.5} position: {0.5, 0.5}
+			 {
+		        data "Good recommendation" value: good_rec 	color: #blue;
+		        data "Bad recommendation"  value: bad_rec 	color: #red;
+	        }
 		}
+		
+		
+		monitor "Times that agent followed App" 		value: times_follow_app;
+		monitor "Times that agent didn't follow App" 	value: times_follow_known;
+		
+		
 		
 	}
 }
