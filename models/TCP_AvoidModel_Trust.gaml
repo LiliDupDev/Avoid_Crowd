@@ -1,41 +1,41 @@
 /**
-* Name: TCPAvoidMod
-* Based on the internal empty template. 
+* Name: TCPAvoidModelTrust
 * Author: Lili
 * Tags: 
 */
 
 
-model TCPAvoidMod
+model TCPAvoidModelTrust
 
 import "constants.gaml"
 
 global{
-	int displatTextSize <-4;
+	int displatTextSize <- 4;
+	bool flg_save_agent <- false;
 	
 	/* ************************* Parameters ************************** */
 	float 	percentage_allowed	<- 0.25		category:'Environment';
 	bool	allow_cycle			<- false	category:'Environment';
 	float 	cycle_rate			<- 0.0		category:'Environment';
 	
-	int 	peopleApp 			<- 100		category:'New simulation';
+	int 	peopleApp 			<- 1000		category:'New simulation';
 	int 	peopleNApp 			<- 0		category:'New simulation'; // Agentes sin python
 	
 	
 	int	 	wait_response_time		;
-	float	app_trust_decrease	<- 0.15;
+	float	app_trust_decrease	<- 1.0;
 	
 	
 	float health_distance <-	1.5;
 	
 	/* ************************* Monitors ************************** */
-	int good_rec			<-	0;
-	int bad_rec				<-	0;
-	int times_follow_app	<-	0;
-	int times_follow_known	<-	0;
-	int rec_count			<- 	0;
-	int count_interactions  <-  0;
-	//int request_rec			<- 	0;
+	int good_rec				<-	0;
+	int bad_rec					<-	0;
+	int times_follow_app		<-	0;
+	int times_follow_known		<-	0;
+	int rec_count				<- 	0;
+	int count_interactions  	<-  0;
+	//int request_rec			<- 	0; 
 	
 	
 	/* ************************* Maps ************************** */
@@ -119,6 +119,7 @@ global{
 		{
 			if entry = 1
 			{
+				do save_agents;
 				loop us over: user {
 					average_trust_start <- average_trust_start+us.app_trust;
 				}
@@ -139,6 +140,21 @@ global{
 
 	}
 	
+	action save_agents
+	{
+	
+		if flg_save_agent
+		{
+			ask user {
+				save user to: "../results/user.csv" type:"csv" rewrite: false;
+			}
+		
+			ask people {
+				save user to: "../results/people.csv" type:"csv" rewrite: false;
+			}
+		}
+	}
+	
 	
 	/*
 	reflex save_store_state when:every(10#cycle){
@@ -148,6 +164,11 @@ global{
 	}
 	*/ 
 	
+	reflex update_trust when:every(1#minute)
+	{
+		do calculate_app_trust_average entry:2;
+	}
+	
 	reflex count_interactions when:every(1#minute){
 		count_interactions <- (user sum_of length(each.mobility_contact_u))+(user sum_of length(each.mobility_contact_p))+(person sum_of length(each.mobility_contact_u))+(person sum_of length(each.mobility_contact_p));
 	}
@@ -156,6 +177,7 @@ global{
 	reflex halting when:(people_end_shopping=total_people)
 	{ 
 		do calculate_app_trust_average entry:2;
+		do save_agents;
 		write "Avg start: "+average_trust_start;
 		write "Avg end: "+average_trust_end;
 		write "Rec count:" +rec_count;
@@ -234,12 +256,19 @@ species people skills:[moving] control: simple_bdi{
 	int			waitTimeForResponse <- 0;
 	float 		speed 				<- 5 #km/#h;
 	float   	belief_congestion	<- rnd(0.5,1.0);
-	list<point> visited_places  <- [];
-	
-	
+	list<point> visited_places  	<- [];
 	
 	
 	/* ************************* BDI ************************** */
+	// Personality
+	bool use_personality		<- 	true;
+	float openness				<-	rnd(0.0,1.0);
+	float conscientiousness		<-	rnd(0.0,1.0);
+	float extroversion			<-	rnd(0.0,1.0);
+	float agreeableness			<-	rnd(0.0,1.0);
+	float neurotism				<-	rnd(0.0,1.0);
+	
+	
 	// Beliefs
 	predicate need_supplies 	<- new_predicate("need_supplies");
 	predicate end_shopping 		<- new_predicate("end_shopping");
@@ -421,7 +450,7 @@ species people skills:[moving] control: simple_bdi{
 		{
 			do remove_intention(go_shopping);
 			do add_intention(shopping);
-			shopping_time <- rnd(10,180);
+			shopping_time <- int(gauss(288.0,60.0)); // Considering that every step equals 10 seconds using minutes it'll be (48,10) 
 		}
 	}	
 	
@@ -471,11 +500,16 @@ species people skills:[moving] control: simple_bdi{
 
 
 species user parent:people {
-	list<app> app_list<-[];
-	float app_trust <- rnd(0.0,1.0);
-	string last_choice;
-	list<user> mobility_contact_u <-[] update:user at_distance(health_distance#meters); 
-	list<person> mobility_contact_p <-[] update:person at_distance(health_distance#meters); 
+	list<app> 		app_list			<-[];
+	float 			app_trust 			<- 0.5;//rnd(0.0,1.0);
+	string 			last_choice;
+	list<user> 		mobility_contact_u <-[] update:user at_distance(health_distance#meters); 
+	list<person> 	mobility_contact_p <-[] update:person at_distance(health_distance#meters); 
+	
+	
+	// New trust model
+	int exp_positive					<-	0;
+	int exp_negative					<-	0;
 	
 	
 	init
@@ -532,95 +566,61 @@ species user parent:people {
 		if(length(app_list[0].recommended_places)>0)
 		{
 			rec_count <- rec_count+1;
-			if between(app_trust, 0.65,1 )
+			// if true select app option, false select from its knowledge_base
+			if flip(app_trust)
 			{
 				selected 		<- app_list[0].recommended_places[0];
-				
-				
 				pp 				<-  selected split_with(","); 
 				target 			<- {float(pp[0]),float(pp[1])};
 				converted_target<- to_GAMA_CRS(target,"EPSG:4326").location;
+					
 				if goal_place = converted_target
 				{
-					selected <- one_of(app_list[0].recommended_places - app_list[0].recommended_places[0]);
+					selected 	<- one_of(app_list[0].recommended_places - app_list[0].recommended_places[0]);
 				}
-				
+					
 				pp 				<-  selected split_with(","); 
-				
+					
+					
 				if length(pp)=2
 				{
 					target 			<- {float(pp[0]),float(pp[1])};
 					converted_target<- to_GAMA_CRS(target,"EPSG:4326").location;
 					
-					
+						
 					goal_place 		<- converted_target;
 				}
 				else
 				{
-					failed <- true;
-					rec_count <- rec_count-1;
+					failed 		<- true;
+					rec_count 	<- rec_count-1;
 				}
-				
-				current_choice <- choice[1];
+				current_choice  <- choice[1];
+					
+					
 			}
 			else
 			{
-				// if true select app option, false select from its knowledge_base
-				if flip(0.5)
+				// If user is afraid it means that he already encouter a congestioned stored 
+				// so he is going to find the nearby store and go there
+				if goal_place = knowledge_base[0] and !has_emotion(fearConfirmed)	
 				{
-					
-					selected 		<- app_list[0].recommended_places[0];
-					pp 				<-  selected split_with(","); 
-					target 			<- {float(pp[0]),float(pp[1])};
-					converted_target<- to_GAMA_CRS(target,"EPSG:4326").location;
-					
-					if goal_place = converted_target
-					{
-						selected 	<- one_of(app_list[0].recommended_places - app_list[0].recommended_places[0]);
-					}
-					
-					pp 				<-  selected split_with(","); 
-					
-					
-					if length(pp)=2
-					{
-						target 			<- {float(pp[0]),float(pp[1])};
-						converted_target<- to_GAMA_CRS(target,"EPSG:4326").location;
+					goal_place <- knowledge_base[1];
 						
-						
-						goal_place 		<- converted_target;
-					}
-					else
-					{
-						failed <- true;
-						rec_count <- rec_count-1;
-					}
-					current_choice   <- choice[1];
-					
-					
+				}
+				else if !has_emotion(fearConfirmed)
+				{
+					goal_place <- knowledge_base[0];
 				}
 				else
 				{
-					// If user is afraid it means that he already encouter a congestioned stored 
-					// so he is going to find the nearby store and go there
-					if goal_place = knowledge_base[0] and !has_emotion(fearConfirmed)	
-					{
-						goal_place <- knowledge_base[1];
-						
-					}
-					else if !has_emotion(fearConfirmed)
-					{
-						goal_place <- knowledge_base[0];
-					}
-					else
-					{
-						do select_nearby_store;
-					}
-					
-					current_choice <- choice[2];
-					
+					do select_nearby_store;
 				}
+					
+				current_choice <- choice[2];
+					
 			}
+			
 			
 			
 			if failed
@@ -640,15 +640,17 @@ species user parent:people {
 				do add_intention(go_shopping);
 				
 				//write name + " >> has_emotion " + has_emotion(fearConfirmed)  + " >> Last choice " + last_choice + " >> Last visited: "+last(visited_places) + "  >> old_goal: " + old_goal;
+				/*
 				if has_emotion(fearConfirmed) and last_choice !=choice[2] and app_trust>0 and last(visited_places) != old_goal
 				{
 					app_trust <- app_trust - app_trust_decrease;
 				}
-				
+				 */
 				if has_emotion(fearConfirmed) and last_choice != choice[2] //and last(visited_places) != old_goal
 				{
 					save (string(cycle) + "," +name+","+old_goal+";") to: "../results/bad_recommendation.txt" type:"text" rewrite: false;
-					bad_rec <- bad_rec+1;
+					bad_rec 		<- 	bad_rec+1;			// Global
+					exp_negative	<-	exp_negative+1;		// Individual
 				}
 				
 				
@@ -661,6 +663,8 @@ species user parent:people {
 					times_follow_known <- times_follow_known+1;
 				}
 				
+				// Update trust
+				do update_trust;
 			}
 			
 		}
@@ -681,18 +685,21 @@ species user parent:people {
 	{
 		if (shopping_time<=0)
 		{
+			/* 
 			if last_choice = choice[1] and app_trust < 1
 			{
 				app_trust <- app_trust + app_trust_decrease;
 			}
+			*/
 			
 			if last_choice = choice[1]
 			{
 				save (string(cycle) + "," + name + "," + goal_place + ";") to: "../results/good_recommendation.txt" type:"text" rewrite: false;
-				good_rec <- good_rec+1;
+				good_rec 		<- good_rec+1;
+				exp_positive 	<- exp_positive+1;
 			}
 				
-			if flip(0.5)
+			if flip(0.9)					// If true don't shop
 			{
 				do remove_intention(shopping);
 				do remove_belief(need_supplies);
@@ -720,9 +727,36 @@ species user parent:people {
 		//draw (name+", curIntention:" + get_current_intention()) color:#black size:displatTextSize at:{location.x,location.y+3*displatTextSize}; 
 	}
 	
+	
 	action set_recommended_places(list<string> places)
 	{
 		app_list[0].recommended_places <- places;
+	}
+	
+	
+	action update_trust
+	{
+		float 	indirect_experience	<-	0.0;
+		float 	direct_experience	<- 	0.0;
+		float 	experience			<-	0.0;
+		int 	experiences			<-	exp_positive+exp_negative;
+		
+		if experiences != 0
+		{
+			// Indirect experience
+			indirect_experience 		<-	average_trust_end;
+			
+			// Direct experience
+			direct_experience			<-	exp_positive/experiences;
+			experience			<- (obedience*indirect_experience)+((1-obedience)*direct_experience);
+			
+			app_trust 					<- app_trust + openness*(experience-app_trust)*app_trust_decrease;
+		}
+		else
+		{
+			app_trust 					<- app_trust + openness*(app_trust)*app_trust_decrease;
+		}
+		
 	}
 	
 
@@ -732,7 +766,6 @@ species user parent:people {
 		list<string> 	recommended_places <- [];
 		bool 			flgSend <- false;
 		string 			name;
-		//int 			app_position;
 		point 			coordinates;
 	
 		// Send data to server
@@ -742,7 +775,6 @@ species user parent:people {
 			{
 				string converted_coordinates <- string(coordinates CRS_transform("EPSG:4326"));
 				do send  contents: converted_coordinates;
-				//request_rec <- request_rec+1;
 			}
 
 		}
@@ -783,7 +815,7 @@ species person parent:people
 	{
 		if (shopping_time<=0)
 		{
-			if flip(0.2)
+			if flip(0.9)						// If true don't shop again
 			{
 				do remove_intention(shopping);
 				do remove_belief(need_supplies);
@@ -910,21 +942,34 @@ experiment mi_experimento type:gui{
 	        }
 				
 				
-			chart "Crowd by store" type:series y_label:"Crowd percentage"  size: {0.5,0.5} position: {0, 0.5}
+			chart "Crowd by store" type:series y_label:"Crowd percentage"  size: {1,0.5} position: {0, 0.5}
 			{
 				datalist stores value:(stores collect each.crowd_percentage) legend:(stores collect each.store) color:(stores collect each.color_i) marker:false;
 				data "Percentage allowed" value:(percentage_allowed) color:#red marker:false;
 			}
 			
-			
-			chart "Recommendation" type: pie size: {0.5,0.5} position: {0.5, 0.5}
+	        
+		}
+		
+		display statistics_trust
+		{
+			// mobility_contact
+			chart "Trust evolution" type: series size: {1,0.5} position: {0, 0} {
+	        	data "Trust" value: average_trust_end  marker:false ;
+	        }
+	        
+	        chart "Recommendation" type: pie size: {0.5,0.5} position: {0, 0.5}
 			{
 		        data "Good recommendation" value: good_rec 	color: #blue;
 		        data "Bad recommendation"  value: bad_rec 	color: #red;
 	        }
 	        
+	        chart "Evolution" type: series size: {0.5,0.5} position: {0.5, 0.5}
+			{
+		        data "App recommendation" 	value: times_follow_app 	color: #blue;
+		        data "Knowledge"  			value: times_follow_known 	color: #red;
+	        }
 		}
-		
 		
 		monitor "Times that agent followed App" 		value: times_follow_app;
 		monitor "Times that agent didn't follow App" 	value: times_follow_known;
