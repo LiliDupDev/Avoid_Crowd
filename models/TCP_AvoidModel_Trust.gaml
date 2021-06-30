@@ -18,8 +18,8 @@ global{
 	bool	allow_cycle			<- false	category:'Environment';
 	float 	cycle_rate			<- 0.0		category:'Environment';
 	
-	int 	peopleApp 			<- 1000		category:'New simulation';
-	int 	peopleNApp 			<- 0		category:'New simulation'; // Agentes sin python
+	int 	peopleApp 			<- 0		category:'New simulation';
+	int 	peopleNApp 			<- 500		category:'New simulation'; // Agentes sin python
 	
 	
 	int	 	wait_response_time		;
@@ -327,6 +327,8 @@ species people skills:[moving] control: simple_bdi{
 		
 		// Fill nearby stores
 		do fill_knowledge_base;
+		
+		write name+","+conscientiousness+","+agreeableness+","+obedience;
 	}
 	
 	
@@ -947,8 +949,6 @@ experiment mi_experimento type:gui{
 				datalist stores value:(stores collect each.crowd_percentage) legend:(stores collect each.store) color:(stores collect each.color_i) marker:false;
 				data "Percentage allowed" value:(percentage_allowed) color:#red marker:false;
 			}
-			
-	        
 		}
 		
 		display statistics_trust
